@@ -1,11 +1,9 @@
-// server.js - Main server file for Socket.io chat application
-
-const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
-const cors = require('cors');
-const dotenv = require('dotenv');
-const path = require('path');
+const express = require("express");
+const http = require("http");
+const { Server } = require("socket.io");
+const cors = require("cors");
+const dotenv = require("dotenv");
+const path = require("path");
 
 // Load environment variables
 dotenv.config();
@@ -15,8 +13,8 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: process.env.CLIENT_URL || 'http://localhost:5173',
-    methods: ['GET', 'POST'],
+    origin: process.env.CLIENT_URL || "http://localhost:5173",
+    methods: ["GET", "POST"],
     credentials: true,
   },
 });
@@ -24,109 +22,148 @@ const io = new Server(server, {
 // Middleware
 app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, "public")));
 
-// Store connected users and messages
+// In-memory storage 
 const users = {};
-const messages = [];
 const typingUsers = {};
+const messages = {
+  general: [],
+  sports: [],
+  tech: [],
+};
 
-// Socket.io connection handler
-io.on('connection', (socket) => {
+// Track unread counts per user per room
+const unreadCounts = {}; // { socketId: { general: 0, sports: 0, tech: 0 } }
+
+// Socket.io connection 
+io.on("connection", (socket) => {
   console.log(`User connected: ${socket.id}`);
 
-  // Handle user joining
-  socket.on('user_join', (username) => {
-    users[socket.id] = { username, id: socket.id };
-    io.emit('user_list', Object.values(users));
-    io.emit('user_joined', { username, id: socket.id });
-    console.log(`${username} joined the chat`);
+  // Initialize unread counts for this user
+  unreadCounts[socket.id] = { general: 0, sports: 0, tech: 0 };
+
+  //  User joins
+  socket.on("user_join", (username) => {
+    users[socket.id] = { id: socket.id, username };
+    io.emit("user_list", Object.values(users));
+    io.emit("user_joined", { id: socket.id, username });
+    console.log(`${username} joined`);
   });
 
-  // Handle chat messages
-  socket.on('send_message', (messageData) => {
-    const message = {
-      ...messageData,
+  // Join room 
+  socket.on("join_room", (room) => {
+    if (socket.currentRoom) {
+      socket.leave(socket.currentRoom);
+    }
+    socket.join(room);
+    socket.currentRoom = room;
+
+    // Reset unread count for this room when user joins
+    if (unreadCounts[socket.id]) unreadCounts[socket.id][room] = 0;
+    // Send updated counts to this user
+    socket.emit("unread_counts", unreadCounts[socket.id]);
+
+    console.log(`${users[socket.id]?.username} joined room ${room}`);
+  });
+
+  // Send message 
+  socket.on("send_message", ({ message, room }) => {
+    const msg = {
       id: Date.now(),
-      sender: users[socket.id]?.username || 'Anonymous',
+      sender: users[socket.id]?.username || "Anonymous",
       senderId: socket.id,
+      message,
       timestamp: new Date().toISOString(),
+      isPrivate: false,
+      room: room || "general",
     };
-    
-    messages.push(message);
-    
+
+    const roomName = room || "general";
+
+    if (!messages[roomName]) messages[roomName] = [];
+    messages[roomName].push(msg);
+
     // Limit stored messages to prevent memory issues
-    if (messages.length > 100) {
-      messages.shift();
+    if (messages[roomName].length > 100) {
+      messages[roomName].shift();
     }
-    
-    io.emit('receive_message', message);
-  });
 
-  // Handle typing indicator
-  socket.on('typing', (isTyping) => {
-    if (users[socket.id]) {
-      const username = users[socket.id].username;
-      
-      if (isTyping) {
-        typingUsers[socket.id] = username;
-      } else {
-        delete typingUsers[socket.id];
+    // Emit message to the room
+    io.to(roomName).emit("receive_message", msg);
+
+    // Increment unread counts for all users in the room except sender
+    Object.keys(users).forEach((id) => {
+      if (id !== socket.id) {
+        if (!unreadCounts[id][roomName]) unreadCounts[id][roomName] = 0;
+        unreadCounts[id][roomName] += 1;
+        io.to(id).emit("unread_counts", unreadCounts[id]);
       }
-      
-      io.emit('typing_users', Object.values(typingUsers));
-    }
+    });
   });
 
-  // Handle private messages
-  socket.on('private_message', ({ to, message }) => {
-    const messageData = {
+  //  Private message
+  socket.on("private_message", ({ to, message }) => {
+    const msg = {
       id: Date.now(),
-      sender: users[socket.id]?.username || 'Anonymous',
+      sender: users[socket.id]?.username || "Anonymous",
       senderId: socket.id,
       message,
       timestamp: new Date().toISOString(),
       isPrivate: true,
     };
-    
-    socket.to(to).emit('private_message', messageData);
-    socket.emit('private_message', messageData);
+
+    socket.to(to).emit("private_message", msg);
+    socket.emit("private_message", msg);
+  });
+  
+  // Typing indicator
+  socket.on("typing", (isTyping) => {
+    if (users[socket.id]) {
+      if (isTyping) typingUsers[socket.id] = users[socket.id].username;
+      else delete typingUsers[socket.id];
+      io.emit("typing_users", Object.values(typingUsers));
+    }
   });
 
-  // Handle disconnection
-  socket.on('disconnect', () => {
+  // Disconnect 
+  socket.on("disconnect", () => {
     if (users[socket.id]) {
-      const { username } = users[socket.id];
-      io.emit('user_left', { username, id: socket.id });
-      console.log(`${username} left the chat`);
+      io.emit("user_left", { id: socket.id, username: users[socket.id].username });
+      console.log(`${users[socket.id].username} disconnected`);
     }
-    
     delete users[socket.id];
     delete typingUsers[socket.id];
-    
-    io.emit('user_list', Object.values(users));
-    io.emit('typing_users', Object.values(typingUsers));
+    delete unreadCounts[socket.id]; // remove unread tracking
+    io.emit("user_list", Object.values(users));
+    io.emit("typing_users", Object.values(typingUsers));
   });
 });
 
-// API routes
-app.get('/api/messages', (req, res) => {
-  res.json(messages);
+// API: Get messages with pagination 
+app.get("/api/messages", (req, res) => {
+  const room = req.query.room || "general";
+  const page = parseInt(req.query.page || "0", 10);
+  const pageSize = 20;
+
+  const roomMessages = messages[room] || [];
+  const start = Math.max(roomMessages.length - (page + 1) * pageSize, 0);
+  const end = roomMessages.length - page * pageSize;
+
+  const paginated = roomMessages.slice(start, end);
+  res.json(paginated);
 });
 
-app.get('/api/users', (req, res) => {
+// API: Get users 
+app.get("/api/users", (req, res) => {
   res.json(Object.values(users));
 });
 
-// Root route
-app.get('/', (req, res) => {
-  res.send('Socket.io Chat Server is running');
-});
+//  Root 
+app.get("/", (req, res) => res.send("Socket.io Chat Server Running"));
 
-// Start server
+// Start server 
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 
-module.exports = { app, server, io }; 
+module.exports = { app, server, io };

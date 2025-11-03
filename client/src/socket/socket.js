@@ -22,6 +22,9 @@ export const useSocket = () => {
   const [users, setUsers] = useState([]);
   const [typingUsers, setTypingUsers] = useState([]);
 
+  // --- New: Track unread messages per room ---
+  const [unreadCounts, setUnreadCounts] = useState({});
+
   // Connect to socket server
   const connect = (username) => {
     socket.connect();
@@ -36,13 +39,37 @@ export const useSocket = () => {
   };
 
   // Send a message
-  const sendMessage = (message) => {
-    socket.emit('send_message', { message });
+  const sendMessage = ({ message, room }) => {
+    const msg = {
+      id: Date.now(),
+      message,
+      room,
+      sender: "You",
+      timestamp: new Date().toISOString(),
+      isPrivate: false,
+    };
+
+    // Add to local state immediately
+    setMessages((prev) => [...prev, msg]);
+
+    // --- Reset unread for this room when you send a message ---
+    setUnreadCounts((prev) => ({ ...prev, [room]: 0 }));
+
+    // Emit to server
+    socket.emit("send_message", { message, room });
   };
 
   // Send a private message
   const sendPrivateMessage = (to, message) => {
+    const msg = {
+      id: Date.now(),
+      message,
+      sender: "You",
+      timestamp: new Date().toISOString(),
+      isPrivate: true,
+    };
     socket.emit('private_message', { to, message });
+    setMessages((prev) => [...prev, msg]);
   };
 
   // Set typing status
@@ -65,6 +92,14 @@ export const useSocket = () => {
     const onReceiveMessage = (message) => {
       setLastMessage(message);
       setMessages((prev) => [...prev, message]);
+
+      // --- Increment unread if the message is for a room not currently active ---
+      if (message.room) {
+        setUnreadCounts((prev) => ({
+          ...prev,
+          [message.room]: (prev[message.room] || 0) + 1,
+        }));
+      }
     };
 
     const onPrivateMessage = (message) => {
@@ -138,6 +173,7 @@ export const useSocket = () => {
     messages,
     users,
     typingUsers,
+    unreadCounts, // --- export unreadCounts for use in Chat.jsx ---
     connect,
     disconnect,
     sendMessage,
@@ -146,4 +182,4 @@ export const useSocket = () => {
   };
 };
 
-export default socket; 
+export default socket;
