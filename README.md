@@ -16,6 +16,12 @@ Users can:
 - Reconnect automatically after disconnection  
 All messages are stored **in memory** (for demo purposes) rather than in a database.
 
+## Application screenshot
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/0d54dfb6-dcd9-489d-82d0-0356c5a694f0" />
+
+
+
+
 ---
 
 ## ⚙️ Setup Instructions
@@ -105,8 +111,6 @@ socketio-chat/
 │   └── package.json        # Server dependencies
 └── README.md               # Project documentation
 
-## application screenshot
 
-<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/2e79fe05-3c16-4a71-a970-fa96de79667a" />
 
 
