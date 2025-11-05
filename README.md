@@ -106,5 +106,7 @@ socketio-chat/
 └── README.md               # Project documentation
 
 ## application screenshot
-<img width="1920" height="1080" alt="app screenshot" src="image.png" />
+
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/2e79fe05-3c16-4a71-a970-fa96de79667a" />
+
 
