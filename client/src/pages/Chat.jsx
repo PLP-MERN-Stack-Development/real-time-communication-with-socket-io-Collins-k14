@@ -15,7 +15,7 @@ export default function Chat() {
     users,
     socket,
     unreadCounts,
-    setUnreadCounts,
+    reconnecting,
   } = useSocket();
 
   const [username, setUsername] = useState("");
@@ -25,6 +25,8 @@ export default function Chat() {
   const [currentRoom, setCurrentRoom] = useState("general");
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
 
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
@@ -94,8 +96,7 @@ export default function Chat() {
     if (isConnected) socket?.emit("join_room", room);
     setPage(0);
     setHasMore(true);
-    // Reset unread count for this room
-    setUnreadCounts((prev) => ({ ...prev, [room]: 0 }));
+    // Server will send unread_counts which updates UI
   };
 
   const formatTime = (timestamp) => {
@@ -112,6 +113,14 @@ export default function Chat() {
       ? msg.isPrivate && (msg.sender === privateRecipient.username || msg.sender === "You")
       : !msg.isPrivate && msg.room === currentRoom
   );
+
+  // --- Search messages via server API ---
+  const doSearch = async () => {
+    if (!searchQuery.trim()) return setSearchResults([]);
+    const res = await fetch(`/api/search?q=${encodeURIComponent(searchQuery)}&room=${currentRoom}`);
+    const results = await res.json();
+    setSearchResults(results);
+  };
 
   return (
     <div className="p-4 sm:p-6 font-sans">
@@ -138,8 +147,8 @@ export default function Chat() {
         <div className="max-w-4xl mx-auto flex flex-col sm:flex-row gap-4">
           {/* Chat Section */}
           <div className="flex-1 flex flex-col gap-3">
-            {/* Room buttons */}
-            <div className="flex gap-2 mb-2 overflow-x-auto">
+            {/* Room buttons + search */}
+            <div className="flex gap-2 mb-2 overflow-x-auto items-center">
               {["general", "sports", "tech"].map((room) => (
                 <button
                   key={room}
@@ -150,18 +159,48 @@ export default function Chat() {
                 >
                   {room}
                   {/* Display unread count if any */}
-                  {unreadCounts[room] > 0 && (
+                  {unreadCounts && unreadCounts[room] > 0 && (
                     <span className="ml-1 text-xs bg-red-500 text-white px-1 rounded-full">
                       {unreadCounts[room]}
                     </span>
                   )}
                 </button>
               ))}
+
+              {/* Search box */}
+              <div className="ml-auto flex items-center gap-2">
+                <input
+                  type="text"
+                  placeholder="Search messages..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="border rounded px-2 py-1"
+                />
+                <button
+                  onClick={doSearch}
+                  className="bg-gray-800 text-white px-3 py-1 rounded"
+                >
+                  Search
+                </button>
+              </div>
             </div>
+
+            {/* Search results */}
+            {searchResults.length > 0 && (
+              <div className="border p-2 rounded bg-white mb-2 max-h-40 overflow-y-auto">
+                <strong>Search results ({searchResults.length}):</strong>
+                {searchResults.map((r) => (
+                  <div key={r.id} className="text-sm py-1 border-b last:border-b-0">
+                    <div><strong>{r.sender}</strong> ({r.room}) — {r.message}</div>
+                    <div className="text-xs text-gray-500">{formatTime(r.timestamp)}</div>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* Connection status */}
             <div className="mb-2 font-semibold text-center sm:text-left">
-              Status: {isConnected ? "🟢 Connected" : "🔴 Disconnected"}
+              Status: {isConnected ? "🟢 Connected" : "🔴 Disconnected"} {reconnecting && " (reconnecting...)"}
             </div>
 
             {/* Messages */}
@@ -182,7 +221,15 @@ export default function Chat() {
                   }`}
                 >
                   {!msg.system && <strong>{msg.sender}</strong>} {!msg.system && ": "} {msg.message}
-                  <span className="float-right text-xs text-gray-500">{formatTime(msg.timestamp)}</span>
+                  <span className="float-right text-xs text-gray-500">
+                    {formatTime(msg.timestamp)}
+                    {/* delivery indicator for own messages */}
+                    {msg.sender === "You" && (
+                      <span className="ml-2 text-xs">
+                        {msg.delivered ? "✔︎" : "⏳"}
+                      </span>
+                    )}
+                  </span>
                 </div>
               ))}
               <div ref={messagesEndRef}></div>

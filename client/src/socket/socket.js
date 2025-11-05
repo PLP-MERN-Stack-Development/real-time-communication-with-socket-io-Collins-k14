@@ -22,8 +22,11 @@ export const useSocket = () => {
   const [users, setUsers] = useState([]);
   const [typingUsers, setTypingUsers] = useState([]);
 
-  // --- New: Track unread messages per room ---
-  const [unreadCounts, setUnreadCounts] = useState({});
+  // Track unread messages per room
+  const [unreadCounts, setUnreadCounts] = useState({ general: 0, sports: 0, tech: 0 });
+
+  // Track reconnection state
+  const [reconnecting, setReconnecting] = useState(false);
 
   // Connect to socket server
   const connect = (username) => {
@@ -38,37 +41,56 @@ export const useSocket = () => {
     socket.disconnect();
   };
 
-  // Send a message
+  // Send a message (uses server ACK to mark delivered)
   const sendMessage = ({ message, room }) => {
+    const tempId = `tmp-${Date.now()}`;
     const msg = {
-      id: Date.now(),
+      id: tempId,
       message,
       room,
       sender: "You",
       timestamp: new Date().toISOString(),
       isPrivate: false,
+      delivered: false,
     };
 
     // Add to local state immediately
     setMessages((prev) => [...prev, msg]);
 
-    // --- Reset unread for this room when you send a message ---
-    setUnreadCounts((prev) => ({ ...prev, [room]: 0 }));
-
-    // Emit to server
-    socket.emit("send_message", { message, room });
+    // Emit to server with acknowledgement callback
+    socket.emit("send_message", { message, room }, (ack) => {
+      if (ack && ack.status === "delivered") {
+        // Update the temp message to mark delivered and set real id
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === tempId ? { ...m, delivered: true, id: ack.id, timestamp: ack.timestamp } : m
+          )
+        );
+      }
+    });
   };
 
-  // Send a private message
+  // Send a private message (uses ACK)
   const sendPrivateMessage = (to, message) => {
+    const tempId = `tmp-${Date.now()}`;
     const msg = {
-      id: Date.now(),
+      id: tempId,
       message,
       sender: "You",
       timestamp: new Date().toISOString(),
       isPrivate: true,
+      delivered: false,
+      to,
     };
-    socket.emit('private_message', { to, message });
+    socket.emit('private_message', { to, message }, (ack) => {
+      if (ack && ack.status === "delivered") {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === tempId ? { ...m, delivered: true, id: ack.id, timestamp: ack.timestamp } : m
+          )
+        );
+      }
+    });
     setMessages((prev) => [...prev, msg]);
   };
 
@@ -82,29 +104,39 @@ export const useSocket = () => {
     // Connection events
     const onConnect = () => {
       setIsConnected(true);
+      setReconnecting(false);
     };
 
     const onDisconnect = () => {
       setIsConnected(false);
     };
 
+    const onReconnectAttempt = () => {
+      setReconnecting(true);
+    };
+
+    const onReconnect = () => {
+      setReconnecting(false);
+    };
+
+    const onReconnectError = () => {
+      setReconnecting(true);
+    };
+
     // Message events
     const onReceiveMessage = (message) => {
       setLastMessage(message);
       setMessages((prev) => [...prev, message]);
-
-      // --- Increment unread if the message is for a room not currently active ---
-      if (message.room) {
-        setUnreadCounts((prev) => ({
-          ...prev,
-          [message.room]: (prev[message.room] || 0) + 1,
-        }));
-      }
     };
 
     const onPrivateMessage = (message) => {
       setLastMessage(message);
       setMessages((prev) => [...prev, message]);
+    };
+
+    // Unread counts sent by server
+    const onUnreadCounts = (counts) => {
+      setUnreadCounts(counts || {});
     };
 
     // User events
@@ -146,8 +178,14 @@ export const useSocket = () => {
     // Register event listeners
     socket.on('connect', onConnect);
     socket.on('disconnect', onDisconnect);
+    socket.on('reconnect_attempt', onReconnectAttempt);
+    socket.on('reconnect', onReconnect);
+    socket.on('reconnect_error', onReconnectError);
+
     socket.on('receive_message', onReceiveMessage);
     socket.on('private_message', onPrivateMessage);
+    socket.on('unread_counts', onUnreadCounts);
+
     socket.on('user_list', onUserList);
     socket.on('user_joined', onUserJoined);
     socket.on('user_left', onUserLeft);
@@ -157,8 +195,14 @@ export const useSocket = () => {
     return () => {
       socket.off('connect', onConnect);
       socket.off('disconnect', onDisconnect);
+      socket.off('reconnect_attempt', onReconnectAttempt);
+      socket.off('reconnect', onReconnect);
+      socket.off('reconnect_error', onReconnectError);
+
       socket.off('receive_message', onReceiveMessage);
       socket.off('private_message', onPrivateMessage);
+      socket.off('unread_counts', onUnreadCounts);
+
       socket.off('user_list', onUserList);
       socket.off('user_joined', onUserJoined);
       socket.off('user_left', onUserLeft);
@@ -173,7 +217,8 @@ export const useSocket = () => {
     messages,
     users,
     typingUsers,
-    unreadCounts, // --- export unreadCounts for use in Chat.jsx ---
+    unreadCounts,
+    reconnecting,
     connect,
     disconnect,
     sendMessage,

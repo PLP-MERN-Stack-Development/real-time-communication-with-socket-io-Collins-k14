@@ -68,9 +68,10 @@ io.on("connection", (socket) => {
   });
 
   // Send message 
-  socket.on("send_message", ({ message, room }) => {
+  // This handler supports acknowledgement callback for delivery confirmation.
+  socket.on("send_message", ({ message, room }, ack) => {
     const msg = {
-      id: Date.now(),
+      id: Date.now(), // server canonical id
       sender: users[socket.id]?.username || "Anonymous",
       senderId: socket.id,
       message,
@@ -92,6 +93,11 @@ io.on("connection", (socket) => {
     // Emit message to the room
     io.to(roomName).emit("receive_message", msg);
 
+    // Acknowledge delivery to the sender 
+    if (typeof ack === "function") {
+      ack({ status: "delivered", id: msg.id, timestamp: msg.timestamp });
+    }
+
     // Increment unread counts for all users in the room except sender
     Object.keys(users).forEach((id) => {
       if (id !== socket.id) {
@@ -103,7 +109,8 @@ io.on("connection", (socket) => {
   });
 
   //  Private message
-  socket.on("private_message", ({ to, message }) => {
+  // Also supports acknowledgement callback
+  socket.on("private_message", ({ to, message }, ack) => {
     const msg = {
       id: Date.now(),
       sender: users[socket.id]?.username || "Anonymous",
@@ -115,6 +122,11 @@ io.on("connection", (socket) => {
 
     socket.to(to).emit("private_message", msg);
     socket.emit("private_message", msg);
+
+    // ACK back to sender with delivered status
+    if (typeof ack === "function") {
+      ack({ status: "delivered", id: msg.id, timestamp: msg.timestamp });
+    }
   });
   
   // Typing indicator
@@ -152,6 +164,33 @@ app.get("/api/messages", (req, res) => {
 
   const paginated = roomMessages.slice(start, end);
   res.json(paginated);
+});
+
+// API: Search messages (simple text search across message content and sender)
+app.get("/api/search", (req, res) => {
+  const q = (req.query.q || "").trim().toLowerCase();
+  const room = req.query.room || null; // optional room filter
+
+  if (!q) return res.json([]);
+
+  const roomsToSearch = room ? [room] : Object.keys(messages);
+  const results = [];
+
+  roomsToSearch.forEach((r) => {
+    const roomMessages = messages[r] || [];
+    roomMessages.forEach((m) => {
+      if (
+        (m.message && m.message.toLowerCase().includes(q)) ||
+        (m.sender && m.sender.toLowerCase().includes(q))
+      ) {
+        results.push({ ...m, room: r });
+      }
+    });
+  });
+
+  // return most recent first
+  results.sort((a, b) => b.id - a.id);
+  res.json(results.slice(0, 100)); // limit results
 });
 
 // API: Get users 
