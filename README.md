@@ -84,6 +84,7 @@ Responsive layout for mobile and desktop
 
 ## Project Structure
 
+```
 socketio-chat/
 ├── client/                 # React front-end
 │   ├── public/             # Static files
@@ -104,8 +105,9 @@ socketio-chat/
 │   ├── server.js           # Main server file
 │   └── package.json        # Server dependencies
 └── README.md               # Project documentation
+```
 
 ## application screenshot
-<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/dc788601-2dce-405b-b2d6-76d591215266" />
 
-
+![alt text](image.png)
+<img width="1920" height="1080" alt="application screenshot" src="image.png" />
